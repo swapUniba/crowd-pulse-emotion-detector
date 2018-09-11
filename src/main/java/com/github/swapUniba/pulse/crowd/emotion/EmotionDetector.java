@@ -10,7 +10,14 @@ import rx.Observable.Operator;
 import rx.observers.SafeSubscriber;
 import rx.Subscriber;
 
-import java.util.Random;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 
 import static com.github.frapontillo.pulse.util.PulseLogger.*;
 
@@ -25,12 +32,6 @@ public class EmotionDetector extends IPlugin<Message, Message, EmotionDetector.E
     private static final String PLUGIN_NAME = "emotion-detector";
     private final static Logger logger = getLogger(EmotionDetector.class);
 
-    // emotions constants
-    private static final String ANGER = "anger";
-    private static final String JOY = "joy";
-    private static final String FEAR = "fear";
-    private static final String DISGUST = "disgust";
-    private static final String SURPRISE = "surprise";
 
     @Override
     public String getName() {
@@ -67,24 +68,46 @@ public class EmotionDetector extends IPlugin<Message, Message, EmotionDetector.E
                     switch (params.getCalculate()) {
 
                         case EmotionDetectorConfig.ALL:
-                            message.setEmotion(calculateEmotions(message.getText()));
+                            try
+                            {
+                                message.setEmotion(calculateEmotions(message.getText(), params.getLang()));
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
                             break;
 
                         case EmotionDetectorConfig.NEW:
                             if (message.getEmotion() == null) {
-                                message.setEmotion(calculateEmotions(message.getText()));
-                            } else {
+                                try
+                                {
+                                    message.setEmotion(calculateEmotions(message.getText(), params.getLang()));
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                            else
+                            {
                                 logger.info("Message skipped (emotion calculated)");
                             }
                             break;
 
                         default:
-                            message.setEmotion(calculateEmotions(message.getText()));
+                            try
+                            {
+                                message.setEmotion(calculateEmotions(message.getText(), params.getLang()));
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
                             break;
                     }
 
                 } else {
-                    message.setEmotion(calculateEmotions(message.getText()));
+                    try
+                    {
+                        message.setEmotion(calculateEmotions(message.getText(), "it"));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                 }
 
                 reportElementAsEnded(message.getId());
@@ -98,12 +121,54 @@ public class EmotionDetector extends IPlugin<Message, Message, EmotionDetector.E
      * @param text the message text
      * @return the emotion
      */
-    private String calculateEmotions(String text) {
+    private String calculateEmotions(String text, String lang) throws IOException {
 
-        // TODO replace code here with real-world one
-        String emotions[] = {ANGER, JOY, FEAR, DISGUST, SURPRISE};
-        return emotions[new Random().nextInt(emotions.length)];
+        HttpURLConnection con = null;
+        String url = "http://90.147.170.25:8080/emotion-labeling/rest/analyze/emotionalLabeling";
+
+        String urlParameters = "text=" + text + "&lang=" + lang;
+        byte[] postData = urlParameters.getBytes(StandardCharsets.UTF_8);
+
+        try
+        {
+
+            URL myurl = new URL(url);
+            con = (HttpURLConnection) myurl.openConnection();
+            con.setDoOutput(true);
+            con.setRequestMethod("POST");
+
+            try (DataOutputStream wr = new DataOutputStream(con.getOutputStream()))
+            {
+                wr.write(postData);
+            }
+
+            StringBuilder content;
+
+
+            try (BufferedReader in = new BufferedReader(
+                    new InputStreamReader(con.getInputStream()))) {
+
+                String line;
+                content = new StringBuilder();
+
+                while ((line = in.readLine()) != null) {
+                    content.append(line);
+                    content.append(System.lineSeparator());
+                }
+            }
+
+            if (content.toString().contains("{\"error\":\"not found\"}"))
+                return "none";
+            else return content.toString();
+
+        }
+        finally
+        {
+
+            con.disconnect();
+        }
     }
+
 
     /**
      * Plugin configuration class.
@@ -126,10 +191,25 @@ public class EmotionDetector extends IPlugin<Message, Message, EmotionDetector.E
          */
         private String calculate;
 
+        /**
+         * Accepted values: it, en.
+         */
+        private String lang;
+
         @Override
         public EmotionDetectorConfig buildFromJsonElement(JsonElement jsonElement) {
             return PluginConfigHelper.buildFromJson(jsonElement, EmotionDetectorConfig.class);
         }
+
+
+        public String getLang() {
+            return lang;
+        }
+
+        public void setLang(String calculate) {
+            this.lang = lang;
+        }
+
 
         public String getCalculate() {
             return calculate;
